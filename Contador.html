@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arena de Batalla 3D - Contador de Personas</title>
+    <!-- 
+      CÓMO USAR ESTE ARCHIVO:
+      1. Guarda este código como un archivo con extensión .html (ej. "arena_contador.html").
+      2. Ábrelo en un navegador web moderno como Chrome o Firefox.
+      3. Se necesita conexión a internet para cargar las bibliotecas desde los CDNs.
+
+      BIBLIOTECAS EXTERNAS UTILIZADAS (vía CDN):
+      - three.js: Biblioteca para renderizado 3D.
+      - cannon-es: Motor de físicas para la simulación.
+      - OrbitControls: Para controlar la cámara 3D con el ratón/táctil.
+      - CSS2DRenderer: Para mostrar etiquetas de texto HTML en el mundo 3D.
+      - Tailwind CSS: Framework de CSS para estilizar la interfaz de usuario.
+
+      CONFIGURACIÓN PRINCIPAL:
+      - Para cambiar el número máximo de agentes, modifica la constante 'MAX_AGENTS'.
+      - Para reiniciar la escena, usa el botón "Reiniciar Batalla".
+    -->
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #111827;
+            color: white;
+        }
+        #info-panel, #stats-panel, #log-panel, #instructions-panel, #victory-message {
+            position: absolute;
+            background-color: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(55, 65, 81, 0.7);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            user-select: none;
+        }
+        .label {
+            color: #fff;
+            font-family: sans-serif;
+            padding: 2px 5px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        #log-content {
+            height: 100px;
+            overflow-y: scroll;
+            font-size: 0.75rem;
+            background-color: rgba(0,0,0,0.3);
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+        }
+        /* Estilo para la barra de scroll del log */
+        #log-content::-webkit-scrollbar { width: 5px; }
+        #log-content::-webkit-scrollbar-track { background: #1f2937; }
+        #log-content::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 5px; }
+        #log-content::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Contenedor para el canvas de Three.js -->
+    <div id="container"></div>
+
+    <!-- Panel de control principal -->
+    <div id="info-panel" class="top-4 left-4 flex flex-col gap-3 w-64">
+        <h1 class="text-xl font-bold text-center">Simulador de Arena</h1>
+        <div class="grid grid-cols-2 gap-2">
+            <button id="add-man" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Añadir Hombre</button>
+            <button id="add-woman" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Añadir Mujer</button>
+        </div>
+        <button id="delete-selected" class="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition-colors disabled:bg-gray-700 disabled:cursor-not-allowed" disabled>Eliminar Seleccionado</button>
+        <button id="calculate-stats" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-colors">Calcular Media</button>
+        <button id="final-battle" class="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-2 px-4 rounded-lg transition-colors">Batalla Final</button>
+        <button id="reset-battle" class="w-full bg-red-800 hover:bg-red-900 text-white font-bold py-2 px-4 rounded-lg transition-colors">Reiniciar Batalla</button>
+        <div class="flex items-center justify-center gap-2 mt-2">
+            <button id="pause-button" class="bg-gray-600 hover:bg-gray-700 text-white font-bold p-2 rounded-lg">Pausar</button>
+            <span class="text-sm">Velocidad:</span>
+            <select id="speed-control" class="bg-gray-700 text-white rounded-md p-1">
+                <option value="0.5">x0.5</option>
+                <option value="1" selected>x1</option>
+                <option value="2">x2</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Panel de estadísticas -->
+    <div id="stats-panel" class="top-4 right-4 flex flex-col gap-2 w-64 hidden">
+        <h2 class="text-lg font-bold">Estadísticas</h2>
+        <p>Hombres: <span id="men-count">0</span> (<span id="men-percent">0</span>%)</p>
+        <p>Mujeres: <span id="women-count">0</span> (<span id="women-percent">0</span>%)</p>
+        <p>Total: <span id="total-count">0</span></p>
+        <p class="font-bold">Media Aritmética: <span id="average">0</span></p>
+    </div>
+    
+    <!-- Panel de Log (opcional) -->
+    <div id="log-panel" class="bottom-4 left-4 w-80">
+        <div class="flex justify-between items-center cursor-pointer" id="log-header">
+            <h2 class="text-lg font-bold">Registro de Eventos</h2>
+            <span id="log-toggle">▼</span>
+        </div>
+        <div id="log-content" class="mt-2 hidden"></div>
+    </div>
+    
+    <!-- Panel de instrucciones -->
+    <div id="instructions-panel" class="bottom-4 right-4 w-72 text-sm">
+        <h3 class="font-bold mb-2">Instrucciones</h3>
+        <ul class="list-disc list-inside">
+            <li><b>Mover cámara:</b> Clic izquierdo y arrastrar.</li>
+            <li><b>Zoom:</b> Rueda del ratón.</li>
+            <li><b>Panorámica:</b> Clic derecho y arrastrar.</li>
+            <li><b>Seleccionar:</b> Clic en un agente.</li>
+            <li><b>Pausa/Reanudar:</b> Barra espaciadora.</li>
+        </ul>
+    </div>
+
+    <!-- Mensaje de Victoria -->
+    <div id="victory-message" class="top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 hidden text-center">
+        <h2 id="victory-text" class="text-4xl font-bold"></h2>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+    <script type="module">
+        // ====================================================================
+        // IMPORTACIONES Y CONFIGURACIÓN
+        // ====================================================================
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        // --- Parámetros de Simulación ---
+        const MAX_AGENTS = 150;
+        const PHYSICS_SUBSTEPS = 5; // Más substeps mejoran la estabilidad
+        const ARENA_RADIUS = 30;
+        const ARENA_HEIGHT = 10;
+
+        // --- Variables Globales ---
+        let scene, camera, renderer, labelRenderer, controls, world;
+        let agents = [];
+        let obstacles = [];
+        let selectedAgent = null;
+        let manCounter = 0;
+        let womanCounter = 0;
+        
+        let isBattleActive = false;
+        let isPaused = false;
+        let simulationSpeed = 1;
+        const clock = new THREE.Clock();
+
+        const manMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.5 });
+        const womanMaterial = new THREE.MeshStandardMaterial({ color: 0xff0055, roughness: 0.5 });
+        const selectionMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true });
+        
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // ====================================================================
+        // FUNCIÓN DE INICIO
+        // ====================================================================
+        function init() {
+            // --- Escena y Cámara ---
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111827);
+            scene.fog = new THREE.Fog(0x111827, ARENA_RADIUS * 2, ARENA_RADIUS * 3);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, ARENA_RADIUS * 0.8, ARENA_RADIUS * 1.2);
+            camera.lookAt(0, 0, 0);
+
+            // --- Renderers ---
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = '0px';
+            labelRenderer.domElement.style.pointerEvents = 'none';
+            document.getElementById('container').appendChild(labelRenderer.domElement);
+            
+            // --- Controles ---
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 5;
+            controls.maxDistance = ARENA_RADIUS * 2.5;
+            controls.maxPolarAngle = Math.PI / 2.1;
+
+            // --- Luces ---
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(20, 40, 30);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.top = ARENA_RADIUS * 1.5;
+            dirLight.shadow.camera.bottom = -ARENA_RADIUS * 1.5;
+            dirLight.shadow.camera.left = -ARENA_RADIUS * 1.5;
+            dirLight.shadow.camera.right = ARENA_RADIUS * 1.5;
+            scene.add(dirLight);
+            
+            // --- Mundo Físico ---
+            world = new CANNON.World();
+            world.gravity.set(0, -15, 0); // Gravedad moderada
+            world.broadphase = new CANNON.SAPBroadphase(world);
+            world.allowSleep = true;
+
+            // --- Crear Escenario ---
+            createArena();
+
+            // --- Event Listeners ---
+            setupEventListeners();
+            
+            // --- Iniciar Loop ---
+            animate();
+        }
+
+        // ====================================================================
+        // CREACIÓN DEL ESCENARIO
+        // ====================================================================
+        function createArena() {
+            // --- Suelo ---
+            const groundMaterial = new CANNON.Material('groundMaterial');
+            groundMaterial.friction = 0.4;
+            groundMaterial.restitution = 0.1;
+
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0, material: groundMaterial });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+            world.addBody(groundBody);
+
+            const groundGeometry = new THREE.CylinderGeometry(ARENA_RADIUS, ARENA_RADIUS, 1, 64);
+            const groundMeshMaterial = new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.8 });
+            const groundMesh = new THREE.Mesh(groundGeometry, groundMeshMaterial);
+            groundMesh.position.y = -0.5;
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+
+            // --- Valla Perimetral ---
+            const wallHeight = 5;
+            const wallThickness = 1; // Un poco más grueso para estabilidad física
+            const numSegments = 64; // Suficientes segmentos para que parezca circular
+            const segmentAngle = (Math.PI * 2) / numSegments;
+            // Longitud del lado de un polígono inscrito, con un pequeño extra para solapar y evitar huecos
+            const segmentLength = (2 * ARENA_RADIUS * Math.sin(segmentAngle / 2)) * 1.05; 
+
+            for (let i = 0; i < numSegments; i++) {
+                const angle = i * segmentAngle;
+                
+                const wallBody = new CANNON.Body({ mass: 0 }); // Cuerpo estático
+                const wallShape = new CANNON.Box(new CANNON.Vec3(segmentLength / 2, wallHeight / 2, wallThickness / 2));
+                
+                const x = ARENA_RADIUS * Math.cos(angle);
+                const z = ARENA_RADIUS * Math.sin(angle);
+                
+                wallBody.position.set(x, wallHeight / 2, z);
+                // Rotamos cada segmento para que su cara ancha apunte hacia el centro
+                wallBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), -angle);
+                
+                wallBody.addShape(wallShape);
+                world.addBody(wallBody);
+            }
+
+            // Malla visual (sin cambios, sigue siendo un cilindro hueco)
+            const wallGeometry = new THREE.CylinderGeometry(ARENA_RADIUS + 0.5, ARENA_RADIUS + 0.5, wallHeight, 64, 1, true);
+            const wallMaterial = new THREE.MeshBasicMaterial({ color: 0x4f46e5, wireframe: true, transparent: true, opacity: 0.5 });
+            const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
+            wallMesh.position.y = wallHeight/2;
+            scene.add(wallMesh);
+
+
+            // --- Obstáculos (rocas y árboles low-poly) ---
+            for (let i = 0; i < 15; i++) {
+                const isTree = Math.random() > 0.5;
+                const radius = (Math.random() * 0.5 + 0.5) * ARENA_RADIUS;
+                const angle = Math.random() * Math.PI * 2;
+                const x = Math.cos(angle) * radius * 0.8;
+                const z = Math.sin(angle) * radius * 0.8;
+
+                if (isTree) {
+                    // Tronco
+                    const trunkHeight = Math.random() * 4 + 3;
+                    const trunkRadius = Math.random() * 0.3 + 0.2;
+                    const trunkGeo = new THREE.CylinderGeometry(trunkRadius * 0.8, trunkRadius, trunkHeight, 8);
+                    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b5cf6 });
+                    const trunkMesh = new THREE.Mesh(trunkGeo, trunkMat);
+                    trunkMesh.position.set(x, trunkHeight / 2, z);
+                    trunkMesh.castShadow = true;
+                    scene.add(trunkMesh);
+                    
+                    // Físicas del tronco
+                    const trunkShape = new CANNON.Cylinder(trunkRadius, trunkRadius, trunkHeight, 8);
+                    const trunkBody = new CANNON.Body({ mass: 0 });
+                    trunkBody.addShape(trunkShape);
+                    trunkBody.position.set(x, trunkHeight / 2, z);
+                    world.addBody(trunkBody);
+
+                    // Follaje
+                    const foliageHeight = Math.random() * 3 + 2;
+                    const foliageGeo = new THREE.ConeGeometry(trunkRadius * 4, foliageHeight, 8);
+                    const foliageMat = new THREE.MeshStandardMaterial({ color: 0x7c3aed });
+                    const foliageMesh = new THREE.Mesh(foliageGeo, foliageMat);
+                    foliageMesh.position.set(x, trunkHeight + foliageHeight / 2, z);
+                    foliageMesh.castShadow = true;
+                    scene.add(foliageMesh);
+                    
+                    obstacles.push({ mesh: [trunkMesh, foliageMesh], body: trunkBody });
+                } else { // Roca
+                    const rockSize = Math.random() * 1.5 + 0.8;
+                    const rockGeo = new THREE.DodecahedronGeometry(rockSize, 0);
+                    const rockMat = new THREE.MeshStandardMaterial({ color: 0x4b5563, flatShading: true });
+                    const rockMesh = new THREE.Mesh(rockGeo, rockMat);
+                    rockMesh.position.set(x, rockSize / 2, z);
+                    rockMesh.rotation.set(Math.random(), Math.random(), Math.random());
+                    rockMesh.castShadow = true;
+                    scene.add(rockMesh);
+
+                    // Físicas de la roca
+                    const rockShape = new CANNON.Sphere(rockSize * 0.8);
+                    const rockBody = new CANNON.Body({ mass: 0 });
+                    rockBody.addShape(rockShape);
+                    rockBody.position.set(x, rockSize / 2, z);
+                    world.addBody(rockBody);
+                    obstacles.push({ mesh: [rockMesh], body: rockBody });
+                }
+            }
+        }
+        
+        // ====================================================================
+        // GESTIÓN DE AGENTES
+        // ====================================================================
+        function createAgent(gender) {
+            if (agents.length >= MAX_AGENTS) {
+                logEvent("Límite de agentes alcanzado.", "system");
+                return;
+            }
+
+            const isMale = gender === 'M';
+            const id = isMale ? `M-${++manCounter}` : `F-${++womanCounter}`;
+            
+            // --- Creación Visual (Three.js) ---
+            const agentGroup = new THREE.Group();
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), isMale ? manMaterial : womanMaterial);
+            head.position.y = 0.7;
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.8, 4, 16), isMale ? manMaterial : womanMaterial);
+            agentGroup.add(head);
+            agentGroup.add(body);
+            agentGroup.traverse(child => {
+                if (child.isMesh) child.castShadow = true;
+            });
+            
+            // --- Posición de spawn circular ---
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.sqrt(Math.random()) * (ARENA_RADIUS - 2); // -2 para aparecer lejos del borde
+            const spawnX = Math.cos(angle) * radius;
+            const spawnZ = Math.sin(angle) * radius;
+
+            // --- Creación Física (Cannon-es) ---
+            const agentShape = new CANNON.Sphere(0.8); // Una esfera es más estable que una cápsula
+            const agentBody = new CANNON.Body({
+                mass: 80,
+                position: new CANNON.Vec3(
+                    spawnX,
+                    ARENA_HEIGHT,
+                    spawnZ
+                ),
+                material: new CANNON.Material({ friction: 0.3, restitution: 0.1 }),
+                linearDamping: 0.8,
+                angularDamping: 0.99 // Aumentar para más estabilidad
+            });
+            agentBody.addShape(agentShape);
+            agentBody.fixedRotation = true; // Evita que giren sobre sí mismos
+            world.addBody(agentBody);
+            
+            // --- Etiqueta de Texto ---
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'label';
+            labelDiv.textContent = id;
+            const textLabel = new CSS2DObject(labelDiv);
+            textLabel.position.set(0, 1.5, 0);
+            agentGroup.add(textLabel);
+            
+            scene.add(agentGroup);
+            
+            // --- Objeto Agente ---
+            const agent = {
+                id,
+                gender,
+                health: 100,
+                attackStrength: 5,
+                mesh: agentGroup,
+                body: agentBody,
+                label: textLabel,
+                target: null,
+                attackCooldown: 0,
+                isDead: false,
+                selectionIndicator: new THREE.Mesh(new THREE.TorusGeometry(1, 0.05, 8, 32), selectionMaterial)
+            };
+            agent.selectionIndicator.rotation.x = Math.PI / 2;
+            agent.selectionIndicator.visible = false;
+            scene.add(agent.selectionIndicator);
+
+            agentBody.userData = agent; // Enlazar cuerpo físico con objeto agente
+            agent.mesh.userData = agent; // Enlazar mesh con objeto agente
+
+            agents.push(agent);
+            logEvent(`Agente ${id} ha entrado a la arena.`, "spawn");
+        }
+
+        function removeAgent(agent) {
+            if (!agent) return;
+            
+            agent.isDead = true;
+            logEvent(`${agent.id} ha sido eliminado.`, "death");
+
+            // Animación de muerte (fade out)
+            let opacity = 1;
+            const fadeInterval = setInterval(() => {
+                opacity -= 0.1;
+                agent.mesh.traverse(child => {
+                    if (child.isMesh && child.material) {
+                        if (!child.material.transparent) child.material.transparent = true;
+                        child.material.opacity = opacity;
+                    }
+                });
+                if (agent.label && agent.label.element) {
+                    agent.label.element.style.opacity = Math.max(0, opacity);
+                }
+                if (opacity <= 0) {
+                    clearInterval(fadeInterval);
+                    // Limpieza final
+                    if (selectedAgent === agent) deselectAgent();
+                    scene.remove(agent.mesh);
+                    scene.remove(agent.selectionIndicator);
+                    world.removeBody(agent.body);
+                    agents = agents.filter(a => a.id !== agent.id);
+                }
+            }, 50);
+        }
+
+        function selectAgent(agent) {
+            if (selectedAgent) {
+                deselectAgent();
+            }
+            selectedAgent = agent;
+            agent.selectionIndicator.visible = true;
+            document.getElementById('delete-selected').disabled = false;
+        }
+
+
+        function deselectAgent() {
+            if (selectedAgent) {
+                selectedAgent.selectionIndicator.visible = false;
+                selectedAgent = null;
+            }
+            document.getElementById('delete-selected').disabled = true;
+        }
+
+
+        // ====================================================================
+        // LÓGICA DE IA Y BATALLA
+        // ====================================================================
+        function updateAI(deltaTime) {
+            if (!isBattleActive) return;
+
+            agents.forEach(agent => {
+                if (agent.isDead) return;
+
+                agent.attackCooldown = Math.max(0, agent.attackCooldown - deltaTime);
+
+                // --- Búsqueda de objetivo ---
+                if (!agent.target || agent.target.isDead) {
+                    agent.target = findClosestEnemy(agent);
+                }
+
+                if (agent.target) {
+                    const selfPos = agent.body.position;
+                    const targetPos = agent.target.body.position;
+                    const distance = selfPos.distanceTo(targetPos);
+                    
+                    // --- Movimiento ---
+                    if (distance > 1.8) { // Distancia de ataque
+                        const direction = targetPos.vsub(selfPos).unit();
+                        const forceMagnitude = 300; // Impulso para moverse
+                        agent.body.applyImpulse(direction.scale(forceMagnitude * deltaTime), selfPos);
+                    } else { // --- Ataque ---
+                         if (agent.attackCooldown <= 0) {
+                            agent.attackCooldown = 1.0; // 1 ataque por segundo
+                            
+                            // Efecto visual de ataque
+                            const attackEffect = new THREE.Mesh(
+                                new THREE.SphereGeometry(0.3, 16, 16),
+                                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true })
+                            );
+                            attackEffect.position.copy(agent.mesh.position);
+                            scene.add(attackEffect);
+                            let effectLifetime = 0.2;
+                            const fadeEffect = setInterval(() => {
+                                effectLifetime -= 0.05;
+                                attackEffect.material.opacity = effectLifetime * 5;
+                                attackEffect.scale.addScalar(0.2);
+                                if (effectLifetime <= 0) {
+                                    clearInterval(fadeEffect);
+                                    scene.remove(attackEffect);
+                                }
+                            }, 50);
+
+                            // Aplicar daño
+                            agent.target.health -= agent.attackStrength;
+                            logEvent(`${agent.id} ataca a ${agent.target.id} (-${agent.attackStrength} HP).`, "attack");
+                            
+                            // Pequeño empujón al recibir daño
+                            const pushDirection = selfPos.vsub(targetPos).unit();
+                            agent.target.body.applyImpulse(pushDirection.scale(50), targetPos);
+
+                            if (agent.target.health <= 0) {
+                                agent.target.health = 0;
+                                removeAgent(agent.target);
+                                agent.target = null;
+                            }
+                        }
+                    }
+                }
+            });
+
+            checkBattleEnd();
+        }
+
+        function findClosestEnemy(currentAgent) {
+            let closest = null;
+            let minDistance = Infinity;
+
+            agents.forEach(otherAgent => {
+                if (otherAgent.isDead || otherAgent.gender === currentAgent.gender) return;
+                
+                const distance = currentAgent.body.position.distanceTo(otherAgent.body.position);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closest = otherAgent;
+                }
+            });
+            return closest;
+        }
+        
+        function checkBattleEnd() {
+            const livingAgents = agents.filter(a => !a.isDead);
+            if (livingAgents.length <= 1 || isBattleActive && livingAgents.every(a => a.gender === livingAgents[0]?.gender)) {
+                isBattleActive = false;
+                let victoryText = "Nadie quedó vivo.";
+                if (livingAgents.length > 0) {
+                    const winnerGender = livingAgents[0].gender === 'M' ? 'Hombres' : 'Mujeres';
+                    victoryText = `¡Victoria: ${winnerGender}!`;
+                }
+                document.getElementById('victory-text').textContent = victoryText;
+                document.getElementById('victory-message').classList.remove('hidden');
+                logEvent(victoryText, "system");
+
+                setTimeout(() => {
+                     document.getElementById('victory-message').classList.add('hidden');
+                }, 5000);
+            }
+        }
+
+
+        // ====================================================================
+        // LOOP PRINCIPAL Y FÍSICAS
+        // ====================================================================
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const deltaTime = Math.min(clock.getDelta() * simulationSpeed, 0.1);
+
+            controls.update();
+
+            if (!isPaused) {
+                // --- Actualizar físicas ---
+                world.step(1 / 60, deltaTime, PHYSICS_SUBSTEPS);
+
+                // --- Sincronizar Three.js con Cannon-es ---
+                agents.forEach(agent => {
+                    if (!agent.isDead) {
+                        agent.mesh.position.copy(agent.body.position);
+                        agent.mesh.quaternion.copy(agent.body.quaternion);
+                        agent.selectionIndicator.position.copy(agent.body.position);
+                        agent.selectionIndicator.position.y = 0.05;
+                    }
+                });
+                
+                // --- Actualizar IA ---
+                if (isBattleActive) {
+                    updateAI(deltaTime);
+                }
+            }
+
+            // --- Renderizar escena ---
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        
+        // ====================================================================
+        // INTERFAZ DE USUARIO (UI) Y EVENTOS
+        // ====================================================================
+        function setupEventListeners() {
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('click', onMouseClick, false);
+            
+            // --- Botones ---
+            document.getElementById('add-man').addEventListener('click', () => createAgent('M'));
+            document.getElementById('add-woman').addEventListener('click', () => createAgent('F'));
+            document.getElementById('delete-selected').addEventListener('click', () => removeAgent(selectedAgent));
+            document.getElementById('calculate-stats').addEventListener('click', updateStats);
+            
+            document.getElementById('final-battle').addEventListener('click', () => {
+                isBattleActive = true;
+                logEvent("¡La batalla final ha comenzado!", "system");
+                document.getElementById('victory-message').classList.add('hidden');
+            });
+            
+            document.getElementById('reset-battle').addEventListener('click', () => {
+                isBattleActive = false;
+                logEvent("La arena ha sido reiniciada.", "system");
+                [...agents].forEach(removeAgent); // Clonar array para evitar problemas al modificarlo
+                setTimeout(() => {
+                    agents = [];
+                    manCounter = 0;
+                    womanCounter = 0;
+                    document.getElementById('log-content').innerHTML = '';
+                    document.getElementById('stats-panel').classList.add('hidden');
+                    document.getElementById('victory-message').classList.add('hidden');
+                }, 1000); // Dar tiempo a las animaciones de muerte
+            });
+
+            document.getElementById('pause-button').addEventListener('click', togglePause);
+            document.getElementById('speed-control').addEventListener('change', (e) => {
+                simulationSpeed = parseFloat(e.target.value);
+            });
+            
+            // --- Atajos de teclado ---
+            window.addEventListener('keydown', (event) => {
+                if (event.code === 'Space') {
+                    event.preventDefault();
+                    togglePause();
+                }
+            });
+
+            // --- Log Desplegable ---
+            document.getElementById('log-header').addEventListener('click', () => {
+                const content = document.getElementById('log-content');
+                const toggle = document.getElementById('log-toggle');
+                content.classList.toggle('hidden');
+                toggle.textContent = content.classList.contains('hidden') ? '▼' : '▲';
+            });
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseClick(event) {
+            // No seleccionar si se está interactuando con la UI
+            if (event.target.closest('#info-panel, #stats-panel, #log-panel, #instructions-panel')) {
+                return;
+            }
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(scene.children, true);
+
+            let clickedAgent = null;
+            for (const intersect of intersects) {
+                let obj = intersect.object;
+                while (obj) {
+                    if (obj.userData && agents.includes(obj.userData)) {
+                        clickedAgent = obj.userData;
+                        break;
+                    }
+                    obj = obj.parent;
+                }
+                if (clickedAgent) break;
+            }
+
+            if (clickedAgent && !clickedAgent.isDead) {
+                selectAgent(clickedAgent);
+            } else {
+                deselectAgent();
+            }
+        }
+        
+        function togglePause() {
+            isPaused = !isPaused;
+            document.getElementById('pause-button').textContent = isPaused ? 'Reanudar' : 'Pausar';
+            logEvent(`Simulación ${isPaused ? 'pausada' : 'reanudada'}.`, 'system');
+        }
+
+        function updateStats() {
+            const men = agents.filter(a => a.gender === 'M' && !a.isDead).length;
+            const women = agents.filter(a => a.gender === 'F' && !a.isDead).length;
+            const total = men + women;
+            const average = total > 0 ? (men + women) / 2 : 0;
+            const menPercent = total > 0 ? ((men / total) * 100).toFixed(1) : 0;
+            const womenPercent = total > 0 ? ((women / total) * 100).toFixed(1) : 0;
+            
+            document.getElementById('men-count').textContent = men;
+            document.getElementById('women-count').textContent = women;
+            document.getElementById('total-count').textContent = total;
+            document.getElementById('average').textContent = average.toFixed(2);
+            document.getElementById('men-percent').textContent = menPercent;
+            document.getElementById('women-percent').textContent = womenPercent;
+            
+            document.getElementById('stats-panel').classList.remove('hidden');
+        }
+        
+        function logEvent(message, type = "info") {
+            const logContent = document.getElementById('log-content');
+            const p = document.createElement('p');
+            
+            let colorClass = 'text-gray-300';
+            if (type === 'attack') colorClass = 'text-yellow-400';
+            else if (type === 'death') colorClass = 'text-red-400';
+            else if (type === 'spawn') colorClass = 'text-green-400';
+            else if (type === 'system') colorClass = 'text-indigo-400 font-bold';
+
+            p.className = `leading-tight ${colorClass}`;
+            p.textContent = `> ${message}`;
+            logContent.appendChild(p);
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        // ====================================================================
+        // EJECUCIÓN
+        // ====================================================================
+        init();
+    </script>
+</body>
+</html>
+
+
+
